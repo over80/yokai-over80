@@ -1,12 +1,17 @@
+#![feature(generators, generator_trait)]
+
+use itertools::izip;
 use itertools::Itertools;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
+use std::ops::{Generator, GeneratorState};
+use std::pin::Pin;
 
 #[derive(Debug)]
 struct CodeMap {
     code2char: HashMap<u8, char>,
     char2code: HashMap<char, u8>,
-    bits2code: HashMap<u8, Vec<u8>>,
+    bits2code: [Vec<u8>; 5],
 }
 
 fn count_bits(d: u8) -> u8 {
@@ -44,15 +49,11 @@ impl CodeMap {
         assert_eq!(code2char.len(), 6 * 7);
         assert_eq!(char2code.len(), 6 * 7);
 
-        let mut bits2code = HashMap::new();
+        let mut bits2code = [vec![], vec![], vec![], vec![], vec![]];
         for &k in code2char.keys() {
             let bits = count_bits(k);
-            bits2code
-                .entry(bits)
-                .and_modify(|e: &mut Vec<_>| e.push(k))
-                .or_insert(vec![k]);
+            bits2code[bits as usize].push(k);
         }
-
         CodeMap {
             code2char,
             char2code,
@@ -96,7 +97,7 @@ impl CodeMap {
 
     fn generate_charset(&self, bits: u8, length: u8) -> Vec<Vec<u8>> {
         let mut result = Vec::new();
-        let codes = self.bits2code.get(&bits).unwrap();
+        let codes = &self.bits2code[bits as usize];
         let mut index = [0usize; 20];
         assert_eq!(length <= 20, true);
         let index = &mut index[0..(length as usize)];
@@ -121,6 +122,26 @@ impl CodeMap {
         }
 
         result
+    }
+
+    fn generate_codes_from_location<'a>(
+        &'a self,
+        location: &'a Vec<u8>,
+    ) -> (impl Generator<Yield = Vec<u8>> + 'a, usize) {
+        let count = location
+            .iter()
+            .map(|&b| self.bits2code[b as usize].len())
+            .product();
+        let generator = move || {
+            for p in location
+                .iter()
+                .map(|&b| &self.bits2code[b as usize])
+                .multi_cartesian_product()
+            {
+                yield p.iter().map(|&&d| d).collect_vec();
+            }
+        };
+        (generator, count)
     }
 }
 
@@ -171,6 +192,32 @@ fn test_generate_charset() {
             [32, 32],
         ]
     );
+}
+
+#[cfg(test)]
+#[test]
+fn test_generate_code_from_location() {
+    let codemap = CodeMap::new();
+    let location = vec![0, 1, 0];
+    let (mut gen, count) = codemap.generate_codes_from_location(&location);
+    assert_eq!(count, 6);
+    let mut result = Vec::new();
+    while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
+        println!("{:?}", code);
+        result.push(code);
+    }
+    result.sort();
+    assert_eq!(
+        result,
+        vec![
+            vec![0, 1, 0],
+            vec![0, 2, 0],
+            vec![0, 4, 0],
+            vec![0, 8, 0],
+            vec![0, 16, 0],
+            vec![0, 32, 0]
+        ]
+    )
 }
 
 fn ror(num: &mut u8, carry: &mut bool) {
@@ -241,6 +288,7 @@ fn adc(num1: u8, num2: u8, carry: &mut bool) -> u8 {
         num as u8
     }
 }
+
 #[cfg(test)]
 #[test]
 fn test_asm_adc() {
@@ -252,8 +300,101 @@ fn test_asm_adc() {
     assert_eq!(c, false);
 }
 
-fn calc_checksum(codes: &Vec<u8>) -> [u8; 8] {
-    let mut m_31f4_31f5 = 0u16;
+struct ReversedShiftHashValue(u8, u8);
+
+impl ReversedShiftHashValue {
+    fn new() -> ReversedShiftHashValue {
+        ReversedShiftHashValue(0, 0)
+    }
+
+    fn reverse(d: u8) -> u8 {
+        let mut d = d;
+        d = (d & 0xf0) >> 4 | (d & 0x0f) << 4;
+        d = (d & 0xcc) >> 2 | (d & 0x33) << 2;
+        d = (d & 0xaa) >> 1 | (d & 0x55) << 1;
+        d
+    }
+
+    fn from(d: u8, e: u8) -> ReversedShiftHashValue {
+        ReversedShiftHashValue(Self::reverse(d), Self::reverse(e))
+    }
+
+    fn as_normal(&self) -> (u8, u8) {
+        (Self::reverse(self.0), Self::reverse(self.1))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_reverse() {
+    assert_eq!(ReversedShiftHashValue::reverse(0x01), 0x80);
+    assert_eq!(ReversedShiftHashValue::reverse(0x02), 0x40);
+    assert_eq!(ReversedShiftHashValue::reverse(0x04), 0x20);
+    assert_eq!(ReversedShiftHashValue::reverse(0x08), 0x10);
+    assert_eq!(ReversedShiftHashValue::reverse(0x10), 0x08);
+    assert_eq!(ReversedShiftHashValue::reverse(0x20), 0x04);
+    assert_eq!(ReversedShiftHashValue::reverse(0x40), 0x02);
+    assert_eq!(ReversedShiftHashValue::reverse(0x80), 0x01);
+}
+
+#[cfg(test)]
+#[test]
+fn test_rev_value_type() {
+    let r = ReversedShiftHashValue::from(0x12, 0x34);
+    assert_eq!((r.0, r.1), (0x48, 0x2c));
+    assert_eq!(r.as_normal(), (0x12, 0x34));
+}
+
+struct ShiftHasher {
+    map: [(u8, u8); 256],
+}
+
+impl ShiftHasher {
+    fn new() -> ShiftHasher {
+        let mut map = [(0u8, 0u8); 256];
+        for (i, p) in map.iter_mut().enumerate() {
+            let mut d = (i as u32) << 8;
+            for _ in 0..8 {
+                d <<= 1;
+                if d & 0x1_00_00 != 0 {
+                    d ^= 0x10_21/* reverse of 0x84_08 */;
+                }
+            }
+            let d = (d & 0xffff) as u16;
+            *p = ((d & 0xff) as u8, (d >> 8) as u8)
+        }
+
+        ShiftHasher { map }
+    }
+
+    fn progress(&self, value: &mut ReversedShiftHashValue, code: u8) {
+        let ub = value.1;
+        let lb = value.0;
+        let mv = self.map[ub as usize];
+        value.0 = mv.0 ^ code;
+        value.1 = mv.1 ^ lb;
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_shift_hasher() {
+    let sh = ShiftHasher::new();
+    for (i, d) in sh.map.iter().enumerate() {
+        println!("{:02x} {:08b} {:08b}", i, d.0, d.1);
+    }
+    let codemap = CodeMap::new();
+    let codes = codemap.codes_of("SPEED-UP").unwrap();
+    let mut hv = ReversedShiftHashValue::new();
+    for d in &codes {
+        sh.progress(&mut hv, *d);
+        println!("{:02x} {:04x}", d, hv.0);
+    }
+    assert_eq!(hv.as_normal(), (0xED, 0x26));
+}
+
+fn calc_checksum(shift_hasher: &ShiftHasher, codes: &Vec<u8>) -> [u8; 8] {
+    let mut m_31f4_31f5 = ReversedShiftHashValue::new();
     let m_31f6 = codes.len() as u8; // 文字数で固定
     let mut m_31f7 = 0u8;
     let mut m_31f8 = 0u8;
@@ -263,20 +404,11 @@ fn calc_checksum(codes: &Vec<u8>) -> [u8; 8] {
 
     for &code in codes {
         // check 1
-        let mut a = code;
-        let mut carry = false;
-        for _ in 0..8 {
-            asl(&mut a, &mut carry);
-            ror16(&mut m_31f4_31f5, &mut carry);
-            if carry {
-                m_31f4_31f5 ^= 0x8408;
-            }
-        }
-        let m_31f4 = (m_31f4_31f5 >> 8) as u8;
-        let m_31f5 = (m_31f4_31f5 & 0xff) as u8;
+        shift_hasher.progress(&mut m_31f4_31f5, code);
+        let (m_31f4, m_31f5) = m_31f4_31f5.as_normal();
 
         // check 2
-        carry = m_31f4 >= 0xe5;
+        let mut carry = m_31f4 >= 0xe5;
         m_31f7 = adc(code, m_31f7, &mut carry);
         m_31f8 = adc(m_31f8, m_31f5, &mut carry);
 
@@ -292,8 +424,7 @@ fn calc_checksum(codes: &Vec<u8>) -> [u8; 8] {
         m_31fb += count_bits(code);
     }
 
-    let m_31f4 = (m_31f4_31f5 >> 8) as u8;
-    let m_31f5 = (m_31f4_31f5 & 0xff) as u8;
+    let (m_31f4, m_31f5) = m_31f4_31f5.as_normal();
     [
         m_31f4, m_31f5, m_31f6, m_31f7, m_31f8, m_31f9, m_31fa, m_31fb,
     ]
@@ -303,32 +434,42 @@ fn calc_checksum(codes: &Vec<u8>) -> [u8; 8] {
 #[test]
 fn test_calc_checksum() {
     let codemap = CodeMap::new();
+    let shift_hasher = ShiftHasher::new();
     let codes = codemap.codes_of("SPEED-UP").unwrap();
     assert_eq!(
-        calc_checksum(&codes),
+        calc_checksum(&shift_hasher, &codes),
         [0xED, 0x26, 0x08, 0xEE, 0x3D, 0x23, 0x1D, 0x12]
     );
 }
 
-fn listup_bit_distribution(num_bits: u8, num_chars: u8) -> Vec<[u8; 5]> {
-    let mut result = Vec::new();
-    let rem_bits = num_bits as i32;
-    let rem_chars = num_chars as i32;
-    for s4 in 0..(min(rem_bits / 4, rem_chars) + 1) {
-        let (rem_bits, rem_chars) = (rem_bits - s4 * 4, rem_chars - s4);
-        for s3 in 0..(min(rem_bits / 3, rem_chars) + 1) {
-            let (rem_bits, rem_chars) = (rem_bits - s3 * 3, rem_chars - s3);
-            for s2 in 0..(min(rem_bits / 2, rem_chars) + 1) {
-                let (rem_bits, rem_chars) = (rem_bits - s2 * 2, rem_chars - s2);
-                for s1 in 0..(min(rem_bits / 1, rem_chars) + 1) {
-                    let (rem_bits, rem_chars) = (rem_bits - s1 * 1, rem_chars - s1);
-                    if rem_bits >= 0 && rem_chars >= 0 {
-                        let s0 = rem_chars;
-                        result.push([s0 as u8, s1 as u8, s2 as u8, s3 as u8, s4 as u8]);
+fn generate_bit_distribution(num_bits: u8, num_chars: u8) -> impl Generator<Yield = [u8; 5]> {
+    move || {
+        let rem_bits = num_bits as i32;
+        let rem_chars = num_chars as i32;
+        for s4 in (0..(min(rem_bits / 4, rem_chars) + 1)).rev() {
+            let (rem_bits, rem_chars) = (rem_bits - s4 * 4, rem_chars - s4);
+            for s3 in (0..(min(rem_bits / 3, rem_chars) + 1)).rev() {
+                let (rem_bits, rem_chars) = (rem_bits - s3 * 3, rem_chars - s3);
+                for s2 in (0..(min(rem_bits / 2, rem_chars) + 1)).rev() {
+                    let (rem_bits, rem_chars) = (rem_bits - s2 * 2, rem_chars - s2);
+                    for s1 in (0..(min(rem_bits / 1, rem_chars) + 1)).rev() {
+                        let (rem_bits, rem_chars) = (rem_bits - s1 * 1, rem_chars - s1);
+                        if rem_bits >= 0 && rem_chars >= 0 {
+                            let s0 = rem_chars;
+                            yield [s0 as u8, s1 as u8, s2 as u8, s3 as u8, s4 as u8];
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+fn listup_bit_distribution(num_bits: u8, num_chars: u8) -> Vec<[u8; 5]> {
+    let mut result = Vec::new();
+    let mut gen = generate_bit_distribution(num_bits, num_chars);
+    while let GeneratorState::Yielded(dist) = Pin::new(&mut gen).resume(()) {
+        result.push(dist);
     }
     result
 }
@@ -336,33 +477,187 @@ fn listup_bit_distribution(num_bits: u8, num_chars: u8) -> Vec<[u8; 5]> {
 #[cfg(test)]
 #[test]
 fn test_bit_dist() {
+    let target = vec![
+        [5, 0, 0, 0, 0],
+        [4, 1, 0, 0, 0],
+        [3, 2, 0, 0, 0],
+        [2, 3, 0, 0, 0],
+        [1, 4, 0, 0, 0],
+        [4, 0, 1, 0, 0],
+        [3, 1, 1, 0, 0],
+        [2, 2, 1, 0, 0],
+        [3, 0, 2, 0, 0],
+        [4, 0, 0, 1, 0],
+        [3, 1, 0, 1, 0],
+        [4, 0, 0, 0, 1],
+    ]
+    .sort();
+
+    assert_eq!(listup_bit_distribution(4, 5).sort(), target);
+}
+
+fn generate_bit_locations(
+    distribution: [u8; 5],
+    total: u8,
+) -> (impl Generator<Yield = Vec<u8>>, usize) {
+    let choice_max_rev = distribution
+        .iter()
+        .rev()
+        .scan(total, |rest, &d| {
+            let current = *rest;
+            *rest -= d;
+            Some(current)
+        })
+        .collect::<Vec<_>>();
+
+    let char_iters_rev = izip!(&choice_max_rev, distribution.iter().rev())
+        .map(|(&cmax, &cnum)| (0..cmax).combinations(cnum as usize).collect())
+        .collect::<Vec<Vec<_>>>();
+
+    let count = char_iters_rev.iter().map(|chars| chars.len()).product();
+    let generator = move || {
+        for choosed_indexes_for_each_num_rev in char_iters_rev.into_iter().multi_cartesian_product()
+        {
+            let mut result = (0..total).map(|_| 0).collect_vec();
+            for (i, choosed_indexes_for_i) in
+                izip!((1..total).rev(), choosed_indexes_for_each_num_rev)
+            // i = 0 は省略する
+            {
+                let mut iter = result.iter_mut();
+                let mut skipped_count = 0;
+                for choosed_index in choosed_indexes_for_i {
+                    while choosed_index > skipped_count {
+                        let mut d = iter.next().unwrap();
+                        while *d != 0 {
+                            d = iter.next().unwrap();
+                        }
+                        skipped_count += 1;
+                    }
+                    let mut d = iter.next().unwrap();
+                    while *d != 0 {
+                        d = iter.next().unwrap();
+                    }
+                    *d = i;
+                    skipped_count += 1;
+                }
+            }
+            yield result.clone();
+        }
+    };
+    (generator, count)
+}
+
+#[cfg(test)]
+#[test]
+fn test_bit_loc() {
+    let pat: [u8; 5] = [2, 0, 2, 0, 1];
+    let (mut gen, count) = generate_bit_locations(pat, pat.iter().sum());
+    let len_expected = 5 * (4 * 3 / 2); /* 5C1 x 4C2 */
+    assert_eq!(count, len_expected);
+    let mut count = 0;
+    while let GeneratorState::Yielded(data) = Pin::new(&mut gen).resume(()) {
+        println!("{}: {:?}", count, data);
+        for i in 0..5 {
+            assert_eq!(
+                data.iter().filter(|&&d| d == i).count(),
+                pat[i as usize] as usize
+            );
+        }
+        count += 1;
+    }
+    assert_eq!(count, len_expected);
+}
+
+fn generate_permutations_wo_dup(chars: Vec<u8>) -> impl Generator<Yield = Vec<u8>> {
+    let l = chars.len();
+    let mut charnums = Vec::with_capacity(l);
+    let mut total = 0usize;
+    let mut count = 0usize;
+    let mut prev = 0;
+    for &c in &chars {
+        if c == prev {
+            count += 1;
+            total += 1;
+        } else {
+            if count > 0 {
+                charnums.push((prev, count, total));
+            }
+            prev = c;
+            count = 1;
+            total += 1;
+        }
+    }
+    if count > 0 {
+        charnums.push((prev, count, total));
+    }
+
+    move || {
+        let iters = charnums
+            .iter()
+            .map(|&(_, count, total)| (0..total).combinations(count));
+        let mut char_uniq = [0u8; 20];
+        charnums
+            .iter()
+            .map(|&(c, _, _)| c)
+            .zip(&mut char_uniq)
+            .foreach(|(c, p)| *p = c);
+
+        for pat in iters.multi_cartesian_product() {
+            let mut code = Vec::with_capacity(l);
+            for (c, ps) in izip!(char_uniq, pat) {
+                for p in ps {
+                    code.insert(p, c);
+                }
+            }
+            yield code;
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_permutations_wo_dup() {
+    let mut gen = generate_permutations_wo_dup(vec![10, 10, 20, 30]);
+    let mut result = Vec::new();
+    while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
+        result.push(code);
+    }
+    result.sort();
     assert_eq!(
-        listup_bit_distribution(4, 5),
+        result,
         vec![
-            [5, 0, 0, 0, 0],
-            [4, 1, 0, 0, 0],
-            [3, 2, 0, 0, 0],
-            [2, 3, 0, 0, 0],
-            [1, 4, 0, 0, 0],
-            [4, 0, 1, 0, 0],
-            [3, 1, 1, 0, 0],
-            [2, 2, 1, 0, 0],
-            [3, 0, 2, 0, 0],
-            [4, 0, 0, 1, 0],
-            [3, 1, 0, 1, 0],
-            [4, 0, 0, 0, 1],
+            vec![10, 10, 20, 30],
+            vec![10, 10, 30, 20],
+            vec![10, 20, 10, 30],
+            vec![10, 20, 30, 10],
+            vec![10, 30, 10, 20],
+            vec![10, 30, 20, 10],
+            vec![20, 10, 10, 30],
+            vec![20, 10, 30, 10],
+            vec![20, 30, 10, 10],
+            vec![30, 10, 10, 20],
+            vec![30, 10, 20, 10],
+            vec![30, 20, 10, 10],
         ]
     );
 }
 
 fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
+    let shift_hasher = ShiftHasher::new();
     let pass_length = target[2]; // パスコードの文字列長
+    let pass_sum = target[3]; // パスコードの総和 + α(最大 pass_length)
     let pass_xor = target[5]; // パスコードの XOR 総和
     let pass_bitsum = target[7]; // パスコードの立っているビットの総和 + α(最大 pass_length)
+    let pass_xor_bits_odd = (count_bits(pass_xor) % 2) == 1;
 
-    let dist_pattern = listup_bit_distribution(pass_bitsum, pass_length);
-    for s in &dist_pattern {
-        let remaining_bitsum = pass_bitsum - s[1] - s[2] * 2 - s[3] * 3 - s[4] * 4;
+    let mut dist_gen = generate_bit_distribution(pass_bitsum, pass_length);
+    while let GeneratorState::Yielded(s) = Pin::new(&mut dist_gen).resume(()) {
+        let used_bits = s[1] + s[2] * 2 + s[3] * 3 + s[4] * 4;
+        if (used_bits % 2 == 1) != pass_xor_bits_odd {
+            // 使用した1ビットの数と xor の1ビットの数の偶奇は一致しないとダメ
+            continue;
+        }
+        let remaining_bitsum = pass_bitsum - used_bits;
         if remaining_bitsum > pass_length {
             continue;
         }
@@ -377,22 +672,29 @@ fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
         println!("{:?}", cc.iter().map(|c| c.len()).product::<usize>());
 
         for ss in cc.iter().map(|c| c.iter()).multi_cartesian_product() {
-            //println!("{:?}", ss);
-            let chars = ss.iter().flat_map(|&s| s).collect::<Vec<&u8>>();
+            let chars = ss.iter().flat_map(|&s| s).map(|&s| s).collect::<Vec<u8>>();
             if chars.iter().fold(0, |a, &b| a ^ b) != pass_xor {
                 continue;
             }
+            let csum = (chars.iter().map(|&d| d as u16).sum::<u16>() & 0xff) as u8;
+            if pass_sum.wrapping_sub(csum) >= pass_length {
+                continue;
+            }
 
-            let mut checked = HashSet::<Vec<u8>>::new();
-
-            for passcode in chars.iter().permutations(chars.len()) {
-                let passcode = passcode.iter().map(|&&&d| d).collect::<Vec<u8>>();
-                if checked.contains(&passcode) {
+            let mut codegen = generate_permutations_wo_dup(chars);
+            while let GeneratorState::Yielded(passcode) = Pin::new(&mut codegen).resume(()) {
+                // 最初２つの checksum だけで試しに確認
+                let mut hv = ReversedShiftHashValue::new();
+                for d in &passcode {
+                    shift_hasher.progress(&mut hv, *d);
+                }
+                if hv.as_normal() != (target[0], target[1]) {
                     continue;
                 }
-                checked.insert(passcode.to_vec());
+
+                // 本確認
                 //println!("TRYING {:?}", passcode);
-                let checksum = calc_checksum(&passcode);
+                let checksum = calc_checksum(&shift_hasher, &passcode);
                 if checksum == target {
                     return Ok(passcode);
                 }
@@ -404,9 +706,21 @@ fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
 
 fn main() {
     let codemap = CodeMap::new();
-    let target: [u8; 8] = calc_checksum(&codemap.codes_of("SPEED-UP").unwrap());
+    let shift_hasher = ShiftHasher::new();
+    //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("TEST").unwrap());
+    //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("MONITOR").unwrap());
+    //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("SPEED-UP").unwrap());
+    //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("UDADAGAWA").unwrap());
+    //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("KOBAYASHI").unwrap());
+    //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("OHAYOUKAWADA").unwrap());
+    let target: [u8; 8] = [0x64, 0x98, 0x0B, 0x15, 0x91, 0x18, 0xB1, 0x15]; /* 11文字 */
+    //let target: [u8; 8] = [0x65, 0x94, 0x0E, 0xAC, 0xE9, 0x07, 0x33, 0x25]; /* 14文字 */
+    println!(
+        "target: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+        target[0], target[1], target[2], target[3], target[4], target[5], target[6], target[7]
+    );
     match search(&codemap, target) {
         Ok(d) => println!("FOUND !!!  passcode is {}", codemap.string_of(d).unwrap()),
-        Err(_) => panic!(),
+        Err(_) => panic!("sorry. not found"),
     }
 }
