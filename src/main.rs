@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 
+const LENGTH_MAX: usize = 16;
+
 #[derive(Debug)]
 struct CodeMap {
     code2char: HashMap<u8, char>,
@@ -300,6 +302,7 @@ fn test_asm_adc() {
     assert_eq!(c, false);
 }
 
+#[derive(Copy, Clone)]
 struct ReversedShiftHashValue(u8, u8);
 
 impl ReversedShiftHashValue {
@@ -347,6 +350,7 @@ fn test_rev_value_type() {
 
 struct ShiftHasher {
     map: [(u8, u8); 256],
+    rmap: [(u8, u8); 256], // map.0 -> (index, map.1)
 }
 
 impl ShiftHasher {
@@ -363,8 +367,15 @@ impl ShiftHasher {
             let d = (d & 0xffff) as u16;
             *p = ((d & 0xff) as u8, (d >> 8) as u8)
         }
-
-        ShiftHasher { map }
+        let mut rmap = [(0u8, 0u8); 256];
+        for (ri, rp) in rmap.iter_mut().enumerate() {
+            for (index, v) in map.iter().enumerate() {
+                if ri as u8 == v.0 {
+                    *rp = (index as u8, v.1)
+                }
+            }
+        }
+        ShiftHasher { map, rmap }
     }
 
     fn progress(&self, value: &mut ReversedShiftHashValue, code: u8) {
@@ -373,6 +384,14 @@ impl ShiftHasher {
         let mv = self.map[ub as usize];
         value.0 = mv.0 ^ code;
         value.1 = mv.1 ^ lb;
+    }
+
+    fn backward(&self, value: &mut ReversedShiftHashValue, code: u8) {
+        let mv0 = value.0 ^ code;
+        let (ub, mv1) = self.rmap[mv0 as usize];
+        let lb = value.1 ^ mv1;
+        value.1 = ub;
+        value.0 = lb;
     }
 }
 
@@ -388,9 +407,15 @@ fn test_shift_hasher() {
     let mut hv = ReversedShiftHashValue::new();
     for d in &codes {
         sh.progress(&mut hv, *d);
-        println!("{:02x} {:04x}", d, hv.0);
+        println!("in({:02x}) {:02x} {:02x}", d, hv.0, hv.1);
     }
     assert_eq!(hv.as_normal(), (0xED, 0x26));
+
+    for d in codes.iter().rev() {
+        sh.backward(&mut hv, *d);
+        println!("out({:02x}) {:02x} {:02x}", d, hv.0, hv.1);
+    }
+    assert_eq!(hv.as_normal(), (0x00, 0x00));
 }
 
 fn calc_checksum(shift_hasher: &ShiftHasher, codes: &Vec<u8>) -> [u8; 8] {
@@ -568,6 +593,53 @@ fn test_bit_loc() {
     assert_eq!(count, len_expected);
 }
 
+// ２つに分ける分け方のパターンを返す。（連続している同じ文字に対する対応入り）
+fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec<u8>)> {
+    let l = chars.len();
+    move || {
+        for pat in (0..l).combinations(l / 2) {
+            // TODO: 流石に無駄が多い。要修正
+            let mut pat_indexed = [false; LENGTH_MAX];
+            let mut iter = pat.iter().peekable();
+            for (i, p) in (&mut pat_indexed[0..l]).into_iter().enumerate() {
+                if let Some(&&ii) = iter.peek() {
+                    if i == ii {
+                        iter.next();
+                        *p = true;
+                    }
+                }
+            }
+            let mut t = izip!(&chars, &pat_indexed);
+            let mut tprev = t.clone();
+            if izip!(tprev, t.skip(1)).all(|((&c_prev, &b_prev), (&c, &b))| {
+                !(c_prev == c && b_prev == false && b == true) /* 同じ文字は前から順に抜く場合のみOK */
+            }) {
+                let (l, r) : (Vec<(&u8, bool)>,Vec<(&u8, bool)>) = izip!(&chars, pat_indexed).partition(|(_, b)| *b);
+                let l = l.into_iter().map(|(&c,_)|c).collect_vec();
+                let r = r.into_iter().map(|(&c,_)|c).collect_vec();
+                
+                yield (r, l);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_split_in_two() {
+    let chars: Vec<u8> = vec![10, 10, 20];
+    let mut gen = generate_split_in_two(chars);
+    let mut result = vec![];
+    while let GeneratorState::Yielded(v) = Pin::new(&mut gen).resume(()) {
+        result.push(v)
+    }
+    result.sort();
+    assert_eq!(
+        result,
+        vec![(vec![10, 10], vec![20]), (vec![10, 20], vec![10])]
+    );
+}
+
 fn generate_permutations_wo_dup(chars: Vec<u8>) -> impl Generator<Yield = Vec<u8>> {
     let l = chars.len();
     let mut charnums = Vec::with_capacity(l);
@@ -595,12 +667,12 @@ fn generate_permutations_wo_dup(chars: Vec<u8>) -> impl Generator<Yield = Vec<u8
         let iters = charnums
             .iter()
             .map(|&(_, count, total)| (0..total).combinations(count));
-        let mut char_uniq = [0u8; 20];
+        let mut char_uniq = [0u8; LENGTH_MAX];
         charnums
             .iter()
             .map(|&(c, _, _)| c)
             .zip(&mut char_uniq)
-            .foreach(|(c, p)| *p = c);
+            .for_each(|(c, p)| *p = c);
 
         for pat in iters.multi_cartesian_product() {
             let mut code = Vec::with_capacity(l);
@@ -681,22 +753,35 @@ fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                 continue;
             }
 
-            let mut codegen = generate_permutations_wo_dup(chars);
-            while let GeneratorState::Yielded(passcode) = Pin::new(&mut codegen).resume(()) {
-                // 最初２つの checksum だけで試しに確認
-                let mut hv = ReversedShiftHashValue::new();
-                for d in &passcode {
-                    shift_hasher.progress(&mut hv, *d);
-                }
-                if hv.as_normal() != (target[0], target[1]) {
-                    continue;
-                }
+            let mut splitgen = generate_split_in_two(chars);
+            while let GeneratorState::Yielded((left, right)) = Pin::new(&mut splitgen).resume(()) {
+                let mut codegen = generate_permutations_wo_dup(left);
+                while let GeneratorState::Yielded(passcode_l) = Pin::new(&mut codegen).resume(()) {
+                    let mut hv = ReversedShiftHashValue::new();
+                    for d in &passcode_l {
+                        shift_hasher.progress(&mut hv, *d);
+                    }
 
-                // 本確認
-                //println!("TRYING {:?}", passcode);
-                let checksum = calc_checksum(&shift_hasher, &passcode);
-                if checksum == target {
-                    return Ok(passcode);
+                    let mut codegen = generate_permutations_wo_dup(right.clone());
+                    while let GeneratorState::Yielded(passcode_r) = Pin::new(&mut codegen).resume(()) {
+                        let mut hv = hv.clone();
+                        for d in &passcode_r {
+                            shift_hasher.progress(&mut hv, *d);
+                        }
+                        if hv.as_normal() != (target[0], target[1]) {
+                            continue;
+                        }
+
+                        // 本確認
+                        let mut passcode = vec![];
+                        passcode.append(&mut passcode_l.clone());
+                        passcode.append(&mut passcode_r.clone());
+                        //println!("TRYING {:?}", passcode);
+                        let checksum = calc_checksum(&shift_hasher, &passcode);
+                        if checksum == target {
+                            return Ok(passcode);
+                        }
+                    }
                 }
             }
         }
@@ -708,12 +793,12 @@ fn main() {
     let codemap = CodeMap::new();
     let shift_hasher = ShiftHasher::new();
     //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("TEST").unwrap());
-    //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("MONITOR").unwrap());
+    let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("MONITOR").unwrap());
     //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("SPEED-UP").unwrap());
     //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("UDADAGAWA").unwrap());
     //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("KOBAYASHI").unwrap());
     //let target: [u8; 8] = calc_checksum(&shift_hasher, &codemap.codes_of("OHAYOUKAWADA").unwrap());
-    let target: [u8; 8] = [0x64, 0x98, 0x0B, 0x15, 0x91, 0x18, 0xB1, 0x15]; /* 11文字 */
+    //let target: [u8; 8] = [0x64, 0x98, 0x0B, 0x15, 0x91, 0x18, 0xB1, 0x15]; /* 11文字 */
     //let target: [u8; 8] = [0x65, 0x94, 0x0E, 0xAC, 0xE9, 0x07, 0x33, 0x25]; /* 14文字 */
     println!(
         "target: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
