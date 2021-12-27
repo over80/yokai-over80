@@ -2,7 +2,7 @@
 
 use itertools::izip;
 use itertools::Itertools;
-use std::cmp::min;
+use std::cmp::{min, max};
 use std::collections::{HashMap, HashSet};
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
@@ -597,7 +597,7 @@ fn test_bit_loc() {
 fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec<u8>)> {
     let l = chars.len();
     move || {
-        for pat in (0..l).combinations(l / 2) {
+        for pat in (0..l).combinations(min(l / 2, 1/* FIXME: なぜか多いほど遅い */)) {
             // TODO: 流石に無駄が多い。要修正
             let mut pat_indexed = [false; LENGTH_MAX];
             let mut iter = pat.iter().peekable();
@@ -722,6 +722,10 @@ fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
     let pass_bitsum = target[7]; // パスコードの立っているビットの総和 + α(最大 pass_length)
     let pass_xor_bits_odd = (count_bits(pass_xor) % 2) == 1;
 
+    // 逆探索用バッファ
+    const BUF_LEN : usize= 100;
+    let mut rmap : [[Vec<[u8;LENGTH_MAX/2]>;256];256] = array_init::array_init(|_| array_init::array_init(|_| Vec::with_capacity(BUF_LEN)));
+
     let mut dist_gen = generate_bit_distribution(pass_bitsum, pass_length);
     while let GeneratorState::Yielded(s) = Pin::new(&mut dist_gen).resume(()) {
         let used_bits = s[1] + s[2] * 2 + s[3] * 3 + s[4] * 4;
@@ -755,27 +759,47 @@ fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
 
             let mut splitgen = generate_split_in_two(chars);
             while let GeneratorState::Yielded((left, right)) = Pin::new(&mut splitgen).resume(()) {
-                let mut codegen = generate_permutations_wo_dup(left);
-                while let GeneratorState::Yielded(passcode_l) = Pin::new(&mut codegen).resume(()) {
+                // 逆方向探索
+                for p in rmap.iter_mut().flat_map(|p| p.iter_mut()) {
+                    p.resize(0, Default::default());
+                }
+                let mut codegen_r = generate_permutations_wo_dup(right.clone());
+                while let GeneratorState::Yielded(passcode_r) = Pin::new(&mut codegen_r).resume(()) {
+                    let mut hv = ReversedShiftHashValue::from(target[0], target[1]);
+                    for d in &passcode_r {
+                        shift_hasher.backward(&mut hv, *d);
+                    }
+                    let mut passcode_r_array = [0u8; LENGTH_MAX/2];
+                    passcode_r.iter().zip(&mut passcode_r_array).for_each(|(&d, p)| *p = d);
+                    if(rmap[hv.0 as usize][hv.1 as usize].len() >= BUF_LEN) {
+                        for line in &rmap {
+                            for col in line {
+                                print!("{:02} ", col.len());
+                            }
+                            println!("");
+                        }
+                        panic!();
+                    };
+                    rmap[hv.0 as usize][hv.1 as usize].push(passcode_r_array);
+                }
+
+                // 順方向探索
+                let mut codegen_l = generate_permutations_wo_dup(left);
+                while let GeneratorState::Yielded(passcode_l) = Pin::new(&mut codegen_l).resume(()) {
                     let mut hv = ReversedShiftHashValue::new();
                     for d in &passcode_l {
                         shift_hasher.progress(&mut hv, *d);
                     }
 
-                    let mut codegen = generate_permutations_wo_dup(right.clone());
-                    while let GeneratorState::Yielded(passcode_r) = Pin::new(&mut codegen).resume(()) {
-                        let mut hv = hv.clone();
-                        for d in &passcode_r {
-                            shift_hasher.progress(&mut hv, *d);
-                        }
-                        if hv.as_normal() != (target[0], target[1]) {
-                            continue;
-                        }
-
+                    for passcode_r in &rmap[hv.0 as usize][hv.1 as usize] {
                         // 本確認
                         let mut passcode = vec![];
-                        passcode.append(&mut passcode_l.clone());
-                        passcode.append(&mut passcode_r.clone());
+                        for &c in &passcode_l {
+                            passcode.push(c);
+                        }
+                        for &c in passcode_r.iter().take(pass_length as usize - passcode_l.len()).rev() {
+                            passcode.push(c);
+                        }
                         //println!("TRYING {:?}", passcode);
                         let checksum = calc_checksum(&shift_hasher, &passcode);
                         if checksum == target {
