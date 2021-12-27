@@ -1,15 +1,13 @@
 use itertools::izip;
 use itertools::Itertools;
 use std::cmp::min;
-use std::collections::{HashMap, HashSet};
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 
+use crate::algo::count_bits;
 use crate::chars::CodeMap;
 use crate::chars::LENGTH_MAX;
-use crate::count_bits;
-use crate::hasher::{ShiftHasher,ReversedShiftHashValue,calc_checksum};
-
+use crate::hasher::{calc_checksum, ReversedShiftHashValue, ShiftHasher};
 
 fn generate_bit_distribution(num_bits: u8, num_chars: u8) -> impl Generator<Yield = [u8; 5]> {
     move || {
@@ -34,6 +32,7 @@ fn generate_bit_distribution(num_bits: u8, num_chars: u8) -> impl Generator<Yiel
     }
 }
 
+#[allow(dead_code)]
 fn listup_bit_distribution(num_bits: u8, num_chars: u8) -> Vec<[u8; 5]> {
     let mut result = Vec::new();
     let mut gen = generate_bit_distribution(num_bits, num_chars);
@@ -43,28 +42,7 @@ fn listup_bit_distribution(num_bits: u8, num_chars: u8) -> Vec<[u8; 5]> {
     result
 }
 
-#[cfg(test)]
-#[test]
-fn test_bit_dist() {
-    let target = vec![
-        [5, 0, 0, 0, 0],
-        [4, 1, 0, 0, 0],
-        [3, 2, 0, 0, 0],
-        [2, 3, 0, 0, 0],
-        [1, 4, 0, 0, 0],
-        [4, 0, 1, 0, 0],
-        [3, 1, 1, 0, 0],
-        [2, 2, 1, 0, 0],
-        [3, 0, 2, 0, 0],
-        [4, 0, 0, 1, 0],
-        [3, 1, 0, 1, 0],
-        [4, 0, 0, 0, 1],
-    ]
-    .sort();
-
-    assert_eq!(listup_bit_distribution(4, 5).sort(), target);
-}
-
+#[allow(dead_code)]
 fn generate_bit_locations(
     distribution: [u8; 5],
     total: u8,
@@ -116,32 +94,11 @@ fn generate_bit_locations(
     (generator, count)
 }
 
-#[cfg(test)]
-#[test]
-fn test_bit_loc() {
-    let pat: [u8; 5] = [2, 0, 2, 0, 1];
-    let (mut gen, count) = generate_bit_locations(pat, pat.iter().sum());
-    let len_expected = 5 * (4 * 3 / 2); /* 5C1 x 4C2 */
-    assert_eq!(count, len_expected);
-    let mut count = 0;
-    while let GeneratorState::Yielded(data) = Pin::new(&mut gen).resume(()) {
-        println!("{}: {:?}", count, data);
-        for i in 0..5 {
-            assert_eq!(
-                data.iter().filter(|&&d| d == i).count(),
-                pat[i as usize] as usize
-            );
-        }
-        count += 1;
-    }
-    assert_eq!(count, len_expected);
-}
-
 // ２つに分ける分け方のパターンを返す。（連続している同じ文字に対する対応入り）
 fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec<u8>)> {
     let l = chars.len();
     move || {
-        for pat in (0..l).combinations(min(l / 2, 1/* FIXME: なぜか多いほど遅い */)) {
+        for pat in (0..l).combinations(min(l / 2, 1 /* FIXME: なぜか多いほど遅い */)) {
             // TODO: 流石に無駄が多い。要修正
             let mut pat_indexed = [false; LENGTH_MAX];
             let mut iter = pat.iter().peekable();
@@ -161,27 +118,11 @@ fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec
                 let (l, r) : (Vec<(&u8, bool)>,Vec<(&u8, bool)>) = izip!(&chars, pat_indexed).partition(|(_, b)| *b);
                 let l = l.into_iter().map(|(&c,_)|c).collect_vec();
                 let r = r.into_iter().map(|(&c,_)|c).collect_vec();
-                
+
                 yield (r, l);
             }
         }
     }
-}
-
-#[cfg(test)]
-#[test]
-fn test_split_in_two() {
-    let chars: Vec<u8> = vec![10, 10, 20];
-    let mut gen = generate_split_in_two(chars);
-    let mut result = vec![];
-    while let GeneratorState::Yielded(v) = Pin::new(&mut gen).resume(()) {
-        result.push(v)
-    }
-    result.sort();
-    assert_eq!(
-        result,
-        vec![(vec![10, 10], vec![20]), (vec![10, 20], vec![10])]
-    );
 }
 
 fn generate_permutations_wo_dup(chars: Vec<u8>) -> impl Generator<Yield = Vec<u8>> {
@@ -230,34 +171,6 @@ fn generate_permutations_wo_dup(chars: Vec<u8>) -> impl Generator<Yield = Vec<u8
     }
 }
 
-#[cfg(test)]
-#[test]
-fn test_permutations_wo_dup() {
-    let mut gen = generate_permutations_wo_dup(vec![10, 10, 20, 30]);
-    let mut result = Vec::new();
-    while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
-        result.push(code);
-    }
-    result.sort();
-    assert_eq!(
-        result,
-        vec![
-            vec![10, 10, 20, 30],
-            vec![10, 10, 30, 20],
-            vec![10, 20, 10, 30],
-            vec![10, 20, 30, 10],
-            vec![10, 30, 10, 20],
-            vec![10, 30, 20, 10],
-            vec![20, 10, 10, 30],
-            vec![20, 10, 30, 10],
-            vec![20, 30, 10, 10],
-            vec![30, 10, 10, 20],
-            vec![30, 10, 20, 10],
-            vec![30, 20, 10, 10],
-        ]
-    );
-}
-
 pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
     let shift_hasher = ShiftHasher::new();
     let pass_length = target[2]; // パスコードの文字列長
@@ -267,8 +180,9 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
     let pass_xor_bits_odd = (count_bits(pass_xor) % 2) == 1;
 
     // 逆探索用バッファ
-    const BUF_LEN : usize= 100;
-    let mut rmap : [[Vec<[u8;LENGTH_MAX/2]>;256];256] = array_init::array_init(|_| array_init::array_init(|_| Vec::with_capacity(BUF_LEN)));
+    const BUF_LEN: usize = 100;
+    let mut rmap: [[Vec<[u8; LENGTH_MAX / 2]>; 256]; 256] =
+        array_init::array_init(|_| array_init::array_init(|_| Vec::with_capacity(BUF_LEN)));
 
     let mut dist_gen = generate_bit_distribution(pass_bitsum, pass_length);
     while let GeneratorState::Yielded(s) = Pin::new(&mut dist_gen).resume(()) {
@@ -308,13 +222,17 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                     p.resize(0, Default::default());
                 }
                 let mut codegen_r = generate_permutations_wo_dup(right.clone());
-                while let GeneratorState::Yielded(passcode_r) = Pin::new(&mut codegen_r).resume(()) {
+                while let GeneratorState::Yielded(passcode_r) = Pin::new(&mut codegen_r).resume(())
+                {
                     let mut hv = ReversedShiftHashValue::from(target[0], target[1]);
                     for d in &passcode_r {
                         shift_hasher.backward(&mut hv, *d);
                     }
-                    let mut passcode_r_array = [0u8; LENGTH_MAX/2];
-                    passcode_r.iter().zip(&mut passcode_r_array).for_each(|(&d, p)| *p = d);
+                    let mut passcode_r_array = [0u8; LENGTH_MAX / 2];
+                    passcode_r
+                        .iter()
+                        .zip(&mut passcode_r_array)
+                        .for_each(|(&d, p)| *p = d);
                     if rmap[hv.0 as usize][hv.1 as usize].len() >= BUF_LEN {
                         for line in &rmap {
                             for col in line {
@@ -329,7 +247,8 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
 
                 // 順方向探索
                 let mut codegen_l = generate_permutations_wo_dup(left);
-                while let GeneratorState::Yielded(passcode_l) = Pin::new(&mut codegen_l).resume(()) {
+                while let GeneratorState::Yielded(passcode_l) = Pin::new(&mut codegen_l).resume(())
+                {
                     let mut hv = ReversedShiftHashValue::new();
                     for d in &passcode_l {
                         shift_hasher.progress(&mut hv, *d);
@@ -341,7 +260,11 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                         for &c in &passcode_l {
                             passcode.push(c);
                         }
-                        for &c in passcode_r.iter().take(pass_length as usize - passcode_l.len()).rev() {
+                        for &c in passcode_r
+                            .iter()
+                            .take(pass_length as usize - passcode_l.len())
+                            .rev()
+                        {
                             passcode.push(c);
                         }
                         //println!("TRYING {:?}", passcode);
@@ -355,4 +278,92 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
         }
     }
     Err(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bit_dist() {
+        let target = vec![
+            [5, 0, 0, 0, 0],
+            [4, 1, 0, 0, 0],
+            [3, 2, 0, 0, 0],
+            [2, 3, 0, 0, 0],
+            [1, 4, 0, 0, 0],
+            [4, 0, 1, 0, 0],
+            [3, 1, 1, 0, 0],
+            [2, 2, 1, 0, 0],
+            [3, 0, 2, 0, 0],
+            [4, 0, 0, 1, 0],
+            [3, 1, 0, 1, 0],
+            [4, 0, 0, 0, 1],
+        ]
+        .sort();
+
+        assert_eq!(listup_bit_distribution(4, 5).sort(), target);
+    }
+
+    #[test]
+    fn bit_loc() {
+        let pat: [u8; 5] = [2, 0, 2, 0, 1];
+        let (mut gen, count) = generate_bit_locations(pat, pat.iter().sum());
+        let len_expected = 5 * (4 * 3 / 2); /* 5C1 x 4C2 */
+        assert_eq!(count, len_expected);
+        let mut count = 0;
+        while let GeneratorState::Yielded(data) = Pin::new(&mut gen).resume(()) {
+            println!("{}: {:?}", count, data);
+            for i in 0..5 {
+                assert_eq!(
+                    data.iter().filter(|&&d| d == i).count(),
+                    pat[i as usize] as usize
+                );
+            }
+            count += 1;
+        }
+        assert_eq!(count, len_expected);
+    }
+
+    #[test]
+    fn split_in_two() {
+        let chars: Vec<u8> = vec![10, 10, 20];
+        let mut gen = generate_split_in_two(chars);
+        let mut result = vec![];
+        while let GeneratorState::Yielded(v) = Pin::new(&mut gen).resume(()) {
+            result.push(v)
+        }
+        result.sort();
+        assert_eq!(
+            result,
+            vec![(vec![10, 10], vec![20]), (vec![10, 20], vec![10])]
+        );
+    }
+
+    #[test]
+    fn permutations_wo_dup() {
+        let mut gen = generate_permutations_wo_dup(vec![10, 10, 20, 30]);
+        let mut result = Vec::new();
+        while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
+            result.push(code);
+        }
+        result.sort();
+        assert_eq!(
+            result,
+            vec![
+                vec![10, 10, 20, 30],
+                vec![10, 10, 30, 20],
+                vec![10, 20, 10, 30],
+                vec![10, 20, 30, 10],
+                vec![10, 30, 10, 20],
+                vec![10, 30, 20, 10],
+                vec![20, 10, 10, 30],
+                vec![20, 10, 30, 10],
+                vec![20, 30, 10, 10],
+                vec![30, 10, 10, 20],
+                vec![30, 10, 20, 10],
+                vec![30, 20, 10, 10],
+            ]
+        );
+    }
 }

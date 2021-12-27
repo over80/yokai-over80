@@ -1,10 +1,6 @@
 #![feature(generators, generator_trait)]
 
-use std::ops::{Generator, GeneratorState};
-use std::pin::Pin;
-
 use yokai::chars::CodeMap;
-use yokai::chars::LENGTH_MAX;
 use yokai::hasher::{calc_checksum, ShiftHasher};
 use yokai::searcher::search;
 

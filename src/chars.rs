@@ -1,9 +1,8 @@
 use itertools::Itertools;
 use std::collections::HashMap;
-use std::ops::{Generator, GeneratorState};
-use std::pin::Pin;
+use std::ops::Generator;
 
-use crate::count_bits;
+use crate::algo::count_bits;
 
 pub const LENGTH_MAX: usize = 16;
 
@@ -134,76 +133,80 @@ impl CodeMap {
 }
 
 #[cfg(test)]
-#[test]
-fn test_code_map() {
-    let codemap = CodeMap::new();
-    assert_eq!(codemap.code_of('こ'), Some(&0x35));
-    assert_eq!(codemap.char_of(0x35), Some(&'こ'));
-    assert_eq!(codemap.codes_of("NEC"), Ok(vec![0x31, 0x20, 0x10]));
-    assert_eq!(codemap.codes_of("nec"), Err("unknown letter: n".into()));
-    assert_eq!(codemap.string_of(vec![0x31, 0x20, 0x10]), Ok("NEC".into()));
-}
+mod tests {
+    use super::*;
+    use std::ops::GeneratorState;
+    use std::pin::Pin;
 
-#[cfg(test)]
-#[test]
-fn test_generate_charset() {
-    let codemap = CodeMap::new();
-    assert_eq!(codemap.generate_charset(0, 2), vec![vec![0, 0]]);
-    let mut r = codemap.generate_charset(1, 2);
-    for s in &mut r {
-        s.sort();
+    #[test]
+    fn test_code_map() {
+        let codemap = CodeMap::new();
+        assert_eq!(codemap.code_of('こ'), Some(&0x35));
+        assert_eq!(codemap.char_of(0x35), Some(&'こ'));
+        assert_eq!(codemap.codes_of("NEC"), Ok(vec![0x31, 0x20, 0x10]));
+        assert_eq!(codemap.codes_of("nec"), Err("unknown letter: n".into()));
+        assert_eq!(codemap.string_of(vec![0x31, 0x20, 0x10]), Ok("NEC".into()));
     }
-    r.sort();
-    assert_eq!(
-        r,
-        vec![
-            [1, 1],
-            [1, 2],
-            [1, 4],
-            [1, 8],
-            [1, 16],
-            [1, 32],
-            [2, 2],
-            [2, 4],
-            [2, 8],
-            [2, 16],
-            [2, 32],
-            [4, 4],
-            [4, 8],
-            [4, 16],
-            [4, 32],
-            [8, 8],
-            [8, 16],
-            [8, 32],
-            [16, 16],
-            [16, 32],
-            [32, 32],
-        ]
-    );
-}
 
-#[cfg(test)]
-#[test]
-fn test_generate_code_from_location() {
-    let codemap = CodeMap::new();
-    let location = vec![0, 1, 0];
-    let (mut gen, count) = codemap.generate_codes_from_location(&location);
-    assert_eq!(count, 6);
-    let mut result = Vec::new();
-    while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
-        println!("{:?}", code);
-        result.push(code);
+    #[test]
+    fn test_generate_charset() {
+        let codemap = CodeMap::new();
+        assert_eq!(codemap.generate_charset(0, 2), vec![vec![0, 0]]);
+        let mut r = codemap.generate_charset(1, 2);
+        for s in &mut r {
+            s.sort();
+        }
+        r.sort();
+        assert_eq!(
+            r,
+            vec![
+                [1, 1],
+                [1, 2],
+                [1, 4],
+                [1, 8],
+                [1, 16],
+                [1, 32],
+                [2, 2],
+                [2, 4],
+                [2, 8],
+                [2, 16],
+                [2, 32],
+                [4, 4],
+                [4, 8],
+                [4, 16],
+                [4, 32],
+                [8, 8],
+                [8, 16],
+                [8, 32],
+                [16, 16],
+                [16, 32],
+                [32, 32],
+            ]
+        );
     }
-    result.sort();
-    assert_eq!(
-        result,
-        vec![
-            vec![0, 1, 0],
-            vec![0, 2, 0],
-            vec![0, 4, 0],
-            vec![0, 8, 0],
-            vec![0, 16, 0],
-            vec![0, 32, 0]
-        ]
-    )
+
+    #[test]
+    fn test_generate_code_from_location() {
+        let codemap = CodeMap::new();
+        let location = vec![0, 1, 0];
+        let (mut gen, count) = codemap.generate_codes_from_location(&location);
+        assert_eq!(count, 6);
+        let mut result = Vec::new();
+        while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
+            println!("{:?}", code);
+            result.push(code);
+        }
+        result.sort();
+        assert_eq!(
+            result,
+            vec![
+                vec![0, 1, 0],
+                vec![0, 2, 0],
+                vec![0, 4, 0],
+                vec![0, 8, 0],
+                vec![0, 16, 0],
+                vec![0, 32, 0]
+            ]
+        )
+    }
 }

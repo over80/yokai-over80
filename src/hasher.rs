@@ -1,5 +1,4 @@
-use crate::chars::CodeMap;
-use crate::count_bits;
+use crate::algo::count_bits;
 
 fn ror(num: &mut u8, carry: &mut bool) {
     let next_carry = (*num & 0x01) != 0;
@@ -36,31 +35,6 @@ fn asl(num: &mut u8, carry: &mut bool) {
     *num <<= 1;
 }
 
-#[cfg(test)]
-#[test]
-fn test_asm_rotate() {
-    let mut a: u8;
-    let mut c: bool;
-    a = 0x84;
-    c = true;
-    ror(&mut a, &mut c);
-    assert_eq!((a, c), (0xc2, false));
-    ror(&mut a, &mut c);
-    assert_eq!((a, c), (0x61, false));
-    ror(&mut a, &mut c);
-    assert_eq!((a, c), (0x30, true));
-    rol(&mut a, &mut c);
-    assert_eq!((a, c), (0x61, false));
-    rol(&mut a, &mut c);
-    assert_eq!((a, c), (0xc2, false));
-    rol(&mut a, &mut c);
-    assert_eq!((a, c), (0x84, true));
-    asl(&mut a, &mut c);
-    assert_eq!((a, c), (0x08, true));
-    asl(&mut a, &mut c);
-    assert_eq!((a, c), (0x10, false));
-}
-
 fn adc(num1: u8, num2: u8, carry: &mut bool) -> u8 {
     let num = num1 as u16 + num2 as u16 + *carry as u16;
     if num > 0xff {
@@ -70,17 +44,6 @@ fn adc(num1: u8, num2: u8, carry: &mut bool) -> u8 {
         *carry = false;
         num as u8
     }
-}
-
-#[cfg(test)]
-#[test]
-fn test_asm_adc() {
-    let mut c: bool = true;
-    assert_eq!(adc(0xa5, 0x5a, &mut c), 0x00);
-    assert_eq!(c, true);
-    c = false;
-    assert_eq!(adc(0xa5, 0x5a, &mut c), 0xff);
-    assert_eq!(c, false);
 }
 
 #[derive(Copy, Clone)]
@@ -106,27 +69,6 @@ impl ReversedShiftHashValue {
     pub fn as_normal(&self) -> (u8, u8) {
         (Self::reverse(self.0), Self::reverse(self.1))
     }
-}
-
-#[cfg(test)]
-#[test]
-fn test_reverse() {
-    assert_eq!(ReversedShiftHashValue::reverse(0x01), 0x80);
-    assert_eq!(ReversedShiftHashValue::reverse(0x02), 0x40);
-    assert_eq!(ReversedShiftHashValue::reverse(0x04), 0x20);
-    assert_eq!(ReversedShiftHashValue::reverse(0x08), 0x10);
-    assert_eq!(ReversedShiftHashValue::reverse(0x10), 0x08);
-    assert_eq!(ReversedShiftHashValue::reverse(0x20), 0x04);
-    assert_eq!(ReversedShiftHashValue::reverse(0x40), 0x02);
-    assert_eq!(ReversedShiftHashValue::reverse(0x80), 0x01);
-}
-
-#[cfg(test)]
-#[test]
-fn test_rev_value_type() {
-    let r = ReversedShiftHashValue::from(0x12, 0x34);
-    assert_eq!((r.0, r.1), (0x48, 0x2c));
-    assert_eq!(r.as_normal(), (0x12, 0x34));
 }
 
 pub struct ShiftHasher {
@@ -176,29 +118,6 @@ impl ShiftHasher {
     }
 }
 
-#[cfg(test)]
-#[test]
-fn test_shift_hasher() {
-    let sh = ShiftHasher::new();
-    for (i, d) in sh.map.iter().enumerate() {
-        println!("{:02x} {:08b} {:08b}", i, d.0, d.1);
-    }
-    let codemap = CodeMap::new();
-    let codes = codemap.codes_of("SPEED-UP").unwrap();
-    let mut hv = ReversedShiftHashValue::new();
-    for d in &codes {
-        sh.progress(&mut hv, *d);
-        println!("in({:02x}) {:02x} {:02x}", d, hv.0, hv.1);
-    }
-    assert_eq!(hv.as_normal(), (0xED, 0x26));
-
-    for d in codes.iter().rev() {
-        sh.backward(&mut hv, *d);
-        println!("out({:02x}) {:02x} {:02x}", d, hv.0, hv.1);
-    }
-    assert_eq!(hv.as_normal(), (0x00, 0x00));
-}
-
 pub fn calc_checksum(shift_hasher: &ShiftHasher, codes: &Vec<u8>) -> [u8; 8] {
     let mut m_31f4_31f5 = ReversedShiftHashValue::new();
     let m_31f6 = codes.len() as u8; // 文字数で固定
@@ -237,13 +156,93 @@ pub fn calc_checksum(shift_hasher: &ShiftHasher, codes: &Vec<u8>) -> [u8; 8] {
 }
 
 #[cfg(test)]
-#[test]
-fn test_calc_checksum() {
-    let codemap = CodeMap::new();
-    let shift_hasher = ShiftHasher::new();
-    let codes = codemap.codes_of("SPEED-UP").unwrap();
-    assert_eq!(
-        calc_checksum(&shift_hasher, &codes),
-        [0xED, 0x26, 0x08, 0xEE, 0x3D, 0x23, 0x1D, 0x12]
-    );
+mod tests {
+    use super::*;
+    use crate::chars::CodeMap;
+
+    #[test]
+    fn test_asm_rotate() {
+        let mut a: u8;
+        let mut c: bool;
+        a = 0x84;
+        c = true;
+        ror(&mut a, &mut c);
+        assert_eq!((a, c), (0xc2, false));
+        ror(&mut a, &mut c);
+        assert_eq!((a, c), (0x61, false));
+        ror(&mut a, &mut c);
+        assert_eq!((a, c), (0x30, true));
+        rol(&mut a, &mut c);
+        assert_eq!((a, c), (0x61, false));
+        rol(&mut a, &mut c);
+        assert_eq!((a, c), (0xc2, false));
+        rol(&mut a, &mut c);
+        assert_eq!((a, c), (0x84, true));
+        asl(&mut a, &mut c);
+        assert_eq!((a, c), (0x08, true));
+        asl(&mut a, &mut c);
+        assert_eq!((a, c), (0x10, false));
+    }
+
+    #[test]
+    fn test_asm_adc() {
+        let mut c: bool = true;
+        assert_eq!(adc(0xa5, 0x5a, &mut c), 0x00);
+        assert_eq!(c, true);
+        c = false;
+        assert_eq!(adc(0xa5, 0x5a, &mut c), 0xff);
+        assert_eq!(c, false);
+    }
+
+    #[test]
+    fn test_reverse() {
+        assert_eq!(ReversedShiftHashValue::reverse(0x01), 0x80);
+        assert_eq!(ReversedShiftHashValue::reverse(0x02), 0x40);
+        assert_eq!(ReversedShiftHashValue::reverse(0x04), 0x20);
+        assert_eq!(ReversedShiftHashValue::reverse(0x08), 0x10);
+        assert_eq!(ReversedShiftHashValue::reverse(0x10), 0x08);
+        assert_eq!(ReversedShiftHashValue::reverse(0x20), 0x04);
+        assert_eq!(ReversedShiftHashValue::reverse(0x40), 0x02);
+        assert_eq!(ReversedShiftHashValue::reverse(0x80), 0x01);
+    }
+
+    #[test]
+    fn test_rev_value_type() {
+        let r = ReversedShiftHashValue::from(0x12, 0x34);
+        assert_eq!((r.0, r.1), (0x48, 0x2c));
+        assert_eq!(r.as_normal(), (0x12, 0x34));
+    }
+
+    #[test]
+    fn test_shift_hasher() {
+        let sh = ShiftHasher::new();
+        for (i, d) in sh.map.iter().enumerate() {
+            println!("{:02x} {:08b} {:08b}", i, d.0, d.1);
+        }
+        let codemap = CodeMap::new();
+        let codes = codemap.codes_of("SPEED-UP").unwrap();
+        let mut hv = ReversedShiftHashValue::new();
+        for d in &codes {
+            sh.progress(&mut hv, *d);
+            println!("in({:02x}) {:02x} {:02x}", d, hv.0, hv.1);
+        }
+        assert_eq!(hv.as_normal(), (0xED, 0x26));
+
+        for d in codes.iter().rev() {
+            sh.backward(&mut hv, *d);
+            println!("out({:02x}) {:02x} {:02x}", d, hv.0, hv.1);
+        }
+        assert_eq!(hv.as_normal(), (0x00, 0x00));
+    }
+
+    #[test]
+    fn test_calc_checksum() {
+        let codemap = CodeMap::new();
+        let shift_hasher = ShiftHasher::new();
+        let codes = codemap.codes_of("SPEED-UP").unwrap();
+        assert_eq!(
+            calc_checksum(&shift_hasher, &codes),
+            [0xED, 0x26, 0x08, 0xEE, 0x3D, 0x23, 0x1D, 0x12]
+        );
+    }
 }
