@@ -125,13 +125,14 @@ fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec
     }
 }
 
-pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
+pub fn search(codemap: &CodeMap, target: [u8; 8], search_all: bool) -> Vec<Vec<u8>> {
     let shift_hasher = ShiftHasher::new();
     let pass_length = target[2]; // パスコードの文字列長
     let pass_sum = target[3]; // パスコードの総和 + α(最大 pass_length)
     let pass_xor = target[5]; // パスコードの XOR 総和
     let pass_bitsum = target[7]; // パスコードの立っているビットの総和 + α(最大 pass_length)
     let pass_xor_bits_odd = (count_bits(pass_xor) % 2) == 1;
+    let mut result = vec![];
 
     // 逆探索用バッファ
     const BUF_LEN: usize = 64;
@@ -139,6 +140,8 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
         Box::new(array_init::array_init(|_| {
             array_init::array_init(|_| array_init::array_init(|_| array_init::array_init(|_| 0)))
         }));
+    let mut rmap_used: [[usize; 256]; 256] =
+        array_init::array_init(|_| array_init::array_init(|_| 0usize));
 
     let mut dist_gen = generate_bit_distribution(pass_bitsum, pass_length);
     while let GeneratorState::Yielded(s) = Pin::new(&mut dist_gen).resume(()) {
@@ -174,8 +177,10 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
             let mut splitgen = generate_split_in_two(chars);
             while let GeneratorState::Yielded((left, right)) = Pin::new(&mut splitgen).resume(()) {
                 // 逆方向探索
-                let mut rmap_used: [[usize; 256]; 256] =
-                    array_init::array_init(|_| array_init::array_init(|_| 0usize));
+                for p in rmap_used.iter_mut().flat_map(|line| line.iter_mut()) {
+                    *p = 0;
+                }
+
                 let mut passcode_r = right.clone();
                 let r_len = passcode_r.len();
                 init_permutations_wo_dup(&mut passcode_r);
@@ -236,7 +241,15 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                         //println!("TRYING {:?}", passcode);
                         let checksum = calc_checksum(&shift_hasher, &passcode);
                         if checksum == target {
-                            return Ok(passcode);
+                            println!(
+                                "FOUND!! {:02x?} {}",
+                                passcode,
+                                codemap.string_of(passcode.clone()).unwrap()
+                            );
+                            result.push(passcode);
+                            if !search_all {
+                                return result;
+                            }
                         }
                     }
 
@@ -247,7 +260,7 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
             }
         }
     }
-    Err(())
+    return result;
 }
 
 #[cfg(test)]
