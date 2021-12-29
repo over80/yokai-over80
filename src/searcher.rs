@@ -98,7 +98,7 @@ fn generate_bit_locations(
 fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec<u8>)> {
     let l = chars.len();
     move || {
-        for pat in (0..l).combinations(min(l / 2, 1 /* FIXME: なぜか多いほど遅い */)) {
+        for pat in (0..l).combinations(min(l / 2, 8 /* FIXME: なぜか多いほど遅い */)) {
             // TODO: 流石に無駄が多い。要修正
             let mut pat_indexed = [false; LENGTH_MAX];
             let mut iter = pat.iter().peekable();
@@ -134,9 +134,11 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
     let pass_xor_bits_odd = (count_bits(pass_xor) % 2) == 1;
 
     // 逆探索用バッファ
-    const BUF_LEN: usize = 100;
-    let mut rmap: [[Vec<[u8; LENGTH_MAX / 2]>; 256]; 256] =
-        array_init::array_init(|_| array_init::array_init(|_| Vec::with_capacity(BUF_LEN)));
+    const BUF_LEN: usize = 64;
+    let mut rmap: Box<[[[[u8; LENGTH_MAX / 2]; BUF_LEN]; 256]; 256]> =
+        Box::new(array_init::array_init(|_| {
+            array_init::array_init(|_| array_init::array_init(|_| array_init::array_init(|_| 0)))
+        }));
 
     let mut dist_gen = generate_bit_distribution(pass_bitsum, pass_length);
     while let GeneratorState::Yielded(s) = Pin::new(&mut dist_gen).resume(()) {
@@ -172,10 +174,10 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
             let mut splitgen = generate_split_in_two(chars);
             while let GeneratorState::Yielded((left, right)) = Pin::new(&mut splitgen).resume(()) {
                 // 逆方向探索
-                for p in rmap.iter_mut().flat_map(|p| p.iter_mut()) {
-                    p.resize(0, Default::default());
-                }
+                let mut rmap_used: [[usize; 256]; 256] =
+                    array_init::array_init(|_| array_init::array_init(|_| 0usize));
                 let mut passcode_r = right.clone();
+                let r_len = passcode_r.len();
                 init_permutations_wo_dup(&mut passcode_r);
                 loop {
                     let mut hv = ReversedShiftHashValue::from(target[0], target[1]);
@@ -187,16 +189,20 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                         .iter()
                         .zip(&mut passcode_r_array)
                         .for_each(|(&d, p)| *p = d);
-                    if rmap[hv.0 as usize][hv.1 as usize].len() >= BUF_LEN {
-                        for line in &rmap {
+                    if rmap_used[hv.0 as usize][hv.1 as usize] >= BUF_LEN {
+                        // TODO ハッシュ衝突対応
+                        for line in &rmap_used {
                             for col in line {
-                                print!("{:02} ", col.len());
+                                print!("{:02} ", col);
                             }
                             println!("");
                         }
                         panic!();
                     };
-                    rmap[hv.0 as usize][hv.1 as usize].push(passcode_r_array);
+                    rmap[hv.0 as usize][hv.1 as usize][rmap_used[hv.0 as usize][hv.1 as usize]]
+                        [0..r_len]
+                        .copy_from_slice(&passcode_r_array[0..r_len]);
+                    rmap_used[hv.0 as usize][hv.1 as usize] += 1;
 
                     if !update_permutations_wo_dup(&mut passcode_r) {
                         break;
@@ -212,7 +218,9 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                         shift_hasher.progress(&mut hv, *d);
                     }
 
-                    for passcode_r in &rmap[hv.0 as usize][hv.1 as usize] {
+                    for passcode_r in &rmap[hv.0 as usize][hv.1 as usize]
+                        [0..rmap_used[hv.0 as usize][hv.1 as usize]]
+                    {
                         // 本確認
                         let mut passcode = vec![];
                         for &c in &passcode_l {
