@@ -4,7 +4,7 @@ use std::cmp::min;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 
-use crate::algo::count_bits;
+use crate::algo::{count_bits, generate_permutations_wo_dup};
 use crate::chars::CodeMap;
 use crate::chars::LENGTH_MAX;
 use crate::hasher::{calc_checksum, ReversedShiftHashValue, ShiftHasher};
@@ -121,52 +121,6 @@ fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec
 
                 yield (r, l);
             }
-        }
-    }
-}
-
-fn generate_permutations_wo_dup(chars: Vec<u8>) -> impl Generator<Yield = Vec<u8>> {
-    let l = chars.len();
-    let mut charnums = Vec::with_capacity(l);
-    let mut total = 0usize;
-    let mut count = 0usize;
-    let mut prev = 0;
-    for &c in &chars {
-        if c == prev {
-            count += 1;
-            total += 1;
-        } else {
-            if count > 0 {
-                charnums.push((prev, count, total));
-            }
-            prev = c;
-            count = 1;
-            total += 1;
-        }
-    }
-    if count > 0 {
-        charnums.push((prev, count, total));
-    }
-
-    move || {
-        let iters = charnums
-            .iter()
-            .map(|&(_, count, total)| (0..total).combinations(count));
-        let mut char_uniq = [0u8; LENGTH_MAX];
-        charnums
-            .iter()
-            .map(|&(c, _, _)| c)
-            .zip(&mut char_uniq)
-            .for_each(|(c, p)| *p = c);
-
-        for pat in iters.multi_cartesian_product() {
-            let mut code = Vec::with_capacity(l);
-            for (c, ps) in izip!(char_uniq, pat) {
-                for p in ps {
-                    code.insert(p, c);
-                }
-            }
-            yield code;
         }
     }
 }
@@ -337,33 +291,6 @@ mod tests {
         assert_eq!(
             result,
             vec![(vec![10, 10], vec![20]), (vec![10, 20], vec![10])]
-        );
-    }
-
-    #[test]
-    fn permutations_wo_dup() {
-        let mut gen = generate_permutations_wo_dup(vec![10, 10, 20, 30]);
-        let mut result = Vec::new();
-        while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
-            result.push(code);
-        }
-        result.sort();
-        assert_eq!(
-            result,
-            vec![
-                vec![10, 10, 20, 30],
-                vec![10, 10, 30, 20],
-                vec![10, 20, 10, 30],
-                vec![10, 20, 30, 10],
-                vec![10, 30, 10, 20],
-                vec![10, 30, 20, 10],
-                vec![20, 10, 10, 30],
-                vec![20, 10, 30, 10],
-                vec![20, 30, 10, 10],
-                vec![30, 10, 10, 20],
-                vec![30, 10, 20, 10],
-                vec![30, 20, 10, 10],
-            ]
         );
     }
 }
