@@ -104,7 +104,7 @@ impl ShiftHasher {
     pub fn progress(&self, value: &mut ReversedShiftHashValue, code: u8) {
         let ub = value.1;
         let lb = value.0;
-        let mv = self.map[ub as usize];
+        let mv = unsafe { self.map.get_unchecked(ub as usize) };
         value.0 = mv.0 ^ code;
         value.1 = mv.1 ^ lb;
     }

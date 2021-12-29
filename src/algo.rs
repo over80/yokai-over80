@@ -1,8 +1,4 @@
-use itertools::izip;
-use itertools::Itertools;
 use std::ops::Generator;
-
-use crate::chars::LENGTH_MAX;
 
 pub fn count_bits(d: u8) -> u8 {
     let mut cnt = 0;
@@ -14,6 +10,31 @@ pub fn count_bits(d: u8) -> u8 {
         a >>= 1;
     }
     cnt
+}
+
+pub fn init_permutations_wo_dup(chars: &mut Vec<u8>) {
+    chars.sort();
+    chars.reverse();
+}
+
+pub fn update_permutations_wo_dup(chars: &mut Vec<u8>) -> bool {
+    let t1 = chars
+        .iter()
+        .zip(&chars[1..])
+        .enumerate()
+        .find_map(|(i, (c, n))| if *c > *n { Some((i + 1, *n)) } else { None });
+    if let Some((i, ci)) = t1 {
+        let j = chars
+            .iter()
+            .enumerate()
+            .find_map(|(j, cj)| if ci < *cj { Some(j) } else { None })
+            .unwrap(); // c[i] < c[i-1] なので、少なくとも i-1 では見つかる
+        chars.swap(i, j);
+        chars[0..i].reverse();
+        return true;
+    } else {
+        return false;
+    }
 }
 
 pub fn generate_permutations_wo_dup(chars: Vec<u8>) -> impl Generator<Yield = Vec<u8>> {
@@ -76,6 +97,38 @@ mod tests {
         let mut result = Vec::new();
         while let GeneratorState::Yielded(code) = Pin::new(&mut gen).resume(()) {
             result.push(code);
+        }
+        result.sort();
+        assert_eq!(
+            result,
+            vec![
+                vec![10, 10, 20, 30],
+                vec![10, 10, 30, 20],
+                vec![10, 20, 10, 30],
+                vec![10, 20, 30, 10],
+                vec![10, 30, 10, 20],
+                vec![10, 30, 20, 10],
+                vec![20, 10, 10, 30],
+                vec![20, 10, 30, 10],
+                vec![20, 30, 10, 10],
+                vec![30, 10, 10, 20],
+                vec![30, 10, 20, 10],
+                vec![30, 20, 10, 10],
+            ]
+        );
+    }
+
+    #[test]
+    fn test_permutations_wo_dup_2_2() {
+        let mut data = vec![10, 10, 20, 30];
+        let mut result = vec![];
+
+        init_permutations_wo_dup(&mut data);
+        loop {
+            result.push(data.clone());
+            if !update_permutations_wo_dup(&mut data) {
+                break;
+            }
         }
         result.sort();
         assert_eq!(

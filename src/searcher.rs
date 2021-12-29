@@ -4,7 +4,7 @@ use std::cmp::min;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 
-use crate::algo::{count_bits, generate_permutations_wo_dup};
+use crate::algo::*;
 use crate::chars::CodeMap;
 use crate::chars::LENGTH_MAX;
 use crate::hasher::{calc_checksum, ReversedShiftHashValue, ShiftHasher};
@@ -175,9 +175,9 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                 for p in rmap.iter_mut().flat_map(|p| p.iter_mut()) {
                     p.resize(0, Default::default());
                 }
-                let mut codegen_r = generate_permutations_wo_dup(right.clone());
-                while let GeneratorState::Yielded(passcode_r) = Pin::new(&mut codegen_r).resume(())
-                {
+                let mut passcode_r = right.clone();
+                init_permutations_wo_dup(&mut passcode_r);
+                loop {
                     let mut hv = ReversedShiftHashValue::from(target[0], target[1]);
                     for d in &passcode_r {
                         shift_hasher.backward(&mut hv, *d);
@@ -197,12 +197,16 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                         panic!();
                     };
                     rmap[hv.0 as usize][hv.1 as usize].push(passcode_r_array);
+
+                    if !update_permutations_wo_dup(&mut passcode_r) {
+                        break;
+                    }
                 }
 
                 // 順方向探索
-                let mut codegen_l = generate_permutations_wo_dup(left);
-                while let GeneratorState::Yielded(passcode_l) = Pin::new(&mut codegen_l).resume(())
-                {
+                let mut passcode_l = left.clone();
+                init_permutations_wo_dup(&mut passcode_l);
+                loop {
                     let mut hv = ReversedShiftHashValue::new();
                     for d in &passcode_l {
                         shift_hasher.progress(&mut hv, *d);
@@ -226,6 +230,10 @@ pub fn search(codemap: &CodeMap, target: [u8; 8]) -> Result<Vec<u8>, ()> {
                         if checksum == target {
                             return Ok(passcode);
                         }
+                    }
+
+                    if !update_permutations_wo_dup(&mut passcode_l) {
+                        break;
                     }
                 }
             }
