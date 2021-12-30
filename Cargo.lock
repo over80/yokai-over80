@@ -636,4 +636,5 @@ dependencies = [
  "clap",
  "criterion",
  "itertools",
+ "num_cpus",
 ]

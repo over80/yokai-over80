@@ -271,7 +271,7 @@ fn search_one_dist(
     result
 }
 
-pub fn search(target: [u8; 8], prefix_codes: Vec<u8>, num_threads: u32) -> Vec<Vec<u8>> {
+pub fn search(target: [u8; 8], prefix_codes: Vec<u8>, num_threads: usize) -> Vec<Vec<u8>> {
     let shift_hasher = ShiftHasher::new();
     let pass_length = target[2]; // パスコードの文字列長
     let pass_sum = target[3]; // パスコードの総和 + α(最大 pass_length)

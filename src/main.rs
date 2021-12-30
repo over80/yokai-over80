@@ -92,17 +92,6 @@ fn main() {
                 }
             }
         }
-        println!(
-            "target checksum: {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
-            checksum[0],
-            checksum[1],
-            checksum[2],
-            checksum[3],
-            checksum[4],
-            checksum[5],
-            checksum[6],
-            checksum[7]
-        );
 
         let codemap = CodeMap::new();
 
@@ -115,13 +104,28 @@ fn main() {
         let search_prefix_codes = search_prefix_codes.unwrap();
         let num_threads = matches
             .value_of("thread")
-            .map(|s| s.parse::<u32>())
-            .unwrap_or(Ok(1));
+            .map(|s| s.parse::<usize>())
+            .unwrap_or(Ok(num_cpus::get()));
         if let Err(e) = num_threads {
             println!("ERROR: invalid thread num : {}", e);
             return;
         }
         let num_threads = num_threads.unwrap();
+
+        println!(
+            "target checksum: {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}",
+            checksum[0],
+            checksum[1],
+            checksum[2],
+            checksum[3],
+            checksum[4],
+            checksum[5],
+            checksum[6],
+            checksum[7]
+        );
+
+        println!("fixed prefix: {}", search_prefix);
+        println!("num of threads: {}", num_threads);
 
         let result = search(checksum, search_prefix_codes, num_threads);
         println!("---------------------------------------------------");
