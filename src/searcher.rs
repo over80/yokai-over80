@@ -125,13 +125,36 @@ fn generate_split_in_two(chars: Vec<u8>) -> impl Generator<Yield = (Vec<u8>, Vec
     }
 }
 
-pub fn search(codemap: &CodeMap, target: [u8; 8], search_all: bool) -> Vec<Vec<u8>> {
+pub fn search(
+    codemap: &CodeMap,
+    target: [u8; 8],
+    search_all: bool,
+    prefix_codes: Vec<u8>,
+) -> Vec<Vec<u8>> {
     let shift_hasher = ShiftHasher::new();
     let pass_length = target[2]; // パスコードの文字列長
     let pass_sum = target[3]; // パスコードの総和 + α(最大 pass_length)
     let pass_xor = target[5]; // パスコードの XOR 総和
     let pass_bitsum = target[7]; // パスコードの立っているビットの総和 + α(最大 pass_length)
     let pass_xor_bits_odd = (count_bits(pass_xor) % 2) == 1;
+
+    let prefix_pass_length = prefix_codes.len() as u8;
+    let prefix_pass_sum = (prefix_codes.iter().map(|&d| d as u16).sum::<u16>() & 0xff) as u8;
+    let prefix_pass_xor = prefix_codes.iter().fold(0, |a, &b| a ^ b);
+    let prefix_pass_bitsum = prefix_codes.iter().fold(0, |a, &b| a + count_bits(b));
+    let prefix_pass_xor_bits_odd = (prefix_pass_bitsum % 2) == 1;
+
+    let nonprefix_pass_length = pass_length - prefix_pass_length;
+    let nonprefix_pass_xor = pass_xor ^ prefix_pass_xor;
+    let nonprefix_pass_bitsum = pass_bitsum - prefix_pass_bitsum;
+    let nonprefix_pass_xor_bits_odd = pass_xor_bits_odd ^ prefix_pass_xor_bits_odd;
+
+    let mut prefix_hv = ReversedShiftHashValue::new();
+    for c in &prefix_codes {
+        shift_hasher.progress(&mut prefix_hv, *c);
+    }
+    let prefix_hv = prefix_hv;
+
     let mut result = vec![];
 
     // 逆探索用バッファ
@@ -143,15 +166,15 @@ pub fn search(codemap: &CodeMap, target: [u8; 8], search_all: bool) -> Vec<Vec<u
     let mut rmap_used: [[usize; 256]; 256] =
         array_init::array_init(|_| array_init::array_init(|_| 0usize));
 
-    let mut dist_gen = generate_bit_distribution(pass_bitsum, pass_length);
+    let mut dist_gen = generate_bit_distribution(nonprefix_pass_bitsum, nonprefix_pass_length);
     while let GeneratorState::Yielded(s) = Pin::new(&mut dist_gen).resume(()) {
         let used_bits = s[1] + s[2] * 2 + s[3] * 3 + s[4] * 4;
-        if (used_bits % 2 == 1) != pass_xor_bits_odd {
+        if (used_bits % 2 == 1) != nonprefix_pass_xor_bits_odd {
             // 使用した1ビットの数と xor の1ビットの数の偶奇は一致しないとダメ
             continue;
         }
-        let remaining_bitsum = pass_bitsum - used_bits;
-        if remaining_bitsum > pass_length {
+        let remaining_bitsum = nonprefix_pass_bitsum - used_bits;
+        if remaining_bitsum > (pass_length/* carry 許容数 */) {
             continue;
         }
 
@@ -166,11 +189,13 @@ pub fn search(codemap: &CodeMap, target: [u8; 8], search_all: bool) -> Vec<Vec<u
 
         for ss in cc.iter().map(|c| c.iter()).multi_cartesian_product() {
             let chars = ss.iter().flat_map(|&s| s).map(|&s| s).collect::<Vec<u8>>();
-            if chars.iter().fold(0, |a, &b| a ^ b) != pass_xor {
+
+            if chars.iter().fold(0, |a, &b| a ^ b) != nonprefix_pass_xor {
                 continue;
             }
-            let csum = (chars.iter().map(|&d| d as u16).sum::<u16>() & 0xff) as u8;
-            if pass_sum.wrapping_sub(csum) >= pass_length {
+            let csum = ((prefix_pass_sum as u16 + chars.iter().map(|&d| d as u16).sum::<u16>())
+                & 0xff) as u8;
+            if pass_sum.wrapping_sub(csum) >= (pass_length/* carry 許容数 */) {
                 continue;
             }
 
@@ -218,7 +243,7 @@ pub fn search(codemap: &CodeMap, target: [u8; 8], search_all: bool) -> Vec<Vec<u
                 let mut passcode_l = left.clone();
                 init_permutations_wo_dup(&mut passcode_l);
                 loop {
-                    let mut hv = ReversedShiftHashValue::new();
+                    let mut hv = prefix_hv.clone();
                     for d in &passcode_l {
                         shift_hasher.progress(&mut hv, *d);
                     }
@@ -228,12 +253,15 @@ pub fn search(codemap: &CodeMap, target: [u8; 8], search_all: bool) -> Vec<Vec<u
                     {
                         // 本確認
                         let mut passcode = vec![];
+                        for &c in &prefix_codes {
+                            passcode.push(c);
+                        }
                         for &c in &passcode_l {
                             passcode.push(c);
                         }
                         for &c in passcode_r
                             .iter()
-                            .take(pass_length as usize - passcode_l.len())
+                            .take(nonprefix_pass_length as usize - passcode_l.len())
                             .rev()
                         {
                             passcode.push(c);

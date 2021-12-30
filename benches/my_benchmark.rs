@@ -1,9 +1,6 @@
 #![feature(generators, generator_trait)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use std::ops::Generator;
-use std::ops::GeneratorState;
-use std::pin::Pin;
 
 use yokai::algo::*;
 use yokai::hasher::{ReversedShiftHashValue, ShiftHasher};
