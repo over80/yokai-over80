@@ -34,18 +34,20 @@ fn main() {
                 .arg(
                     Arg::with_name("prefix")
                         .long("prefix")
-                        .value_name("str")
+                        .value_name("STR")
                         .takes_value(true)
                         .number_of_values(1)
                         .default_value("")
                         .help("search password which only start with this"),
-                ), /*
-                   .arg(
-                       Arg::with_name("thread")
-                           .takes_value(true)
-                           .number_of_values(1)
-                           .help("number of CPU threads")
-                   )*/
+                )
+                .arg(
+                    Arg::with_name("thread")
+                        .long("thread")
+                        .value_name("NUM")
+                        .takes_value(true)
+                        .number_of_values(1)
+                        .help("number of CPU threads"),
+                ),
         )
         .get_matches();
 
@@ -104,7 +106,6 @@ fn main() {
 
         let codemap = CodeMap::new();
 
-        let search_all = true;
         let search_prefix = matches.value_of("prefix").unwrap();
         let search_prefix_codes = codemap.codes_of(search_prefix);
         if let Err(e) = search_prefix_codes {
@@ -112,8 +113,17 @@ fn main() {
             return;
         }
         let search_prefix_codes = search_prefix_codes.unwrap();
+        let num_threads = matches
+            .value_of("thread")
+            .map(|s| s.parse::<u32>())
+            .unwrap_or(Ok(1));
+        if let Err(e) = num_threads {
+            println!("ERROR: invalid thread num : {}", e);
+            return;
+        }
+        let num_threads = num_threads.unwrap();
 
-        let result = search(&codemap, checksum, search_all, search_prefix_codes);
+        let result = search(checksum, search_prefix_codes, num_threads);
         println!("---------------------------------------------------");
         if result.len() == 0 {
             println!("sorry. not found");
