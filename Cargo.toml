@@ -1,14 +1,15 @@
 [package]
+edition = "2021"
 name = "yokai"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-itertools = "0.10.2"
+anyhow = "1.0"
 array-init = "2.0.0"
-clap = "2.34.0"
+clap = {version = "3.0.0", features = ["derive"]}
+itertools = "0.10.2"
 num_cpus = "1.13.1"
 
 [dev-dependencies]
@@ -18,5 +19,5 @@ criterion = "0.3"
 debug = true # for performance profiler
 
 [[bench]]
-name = "my_benchmark"
 harness = false
+name = "my_benchmark"

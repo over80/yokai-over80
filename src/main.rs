@@ -1,6 +1,6 @@
 #![feature(generators, generator_trait)]
 
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg};
 use itertools::Itertools;
 
 use yokai::chars::CodeMap;
@@ -11,28 +11,26 @@ fn main() {
     let matches = App::new("Yokai password searcher")
         .version("0.1")
         .subcommand(
-            SubCommand::with_name("checksum")
-                .about("calc checksum of password")
-                .arg(
-                    Arg::with_name("PASSWORD")
-                        .help("the string to calc checksum")
-                        .required(true)
-                        .index(1),
-                ),
+            App::new("checksum").about("calc checksum of password").arg(
+                Arg::new("PASSWORD")
+                    .help("the string to calc checksum")
+                    .required(true)
+                    .index(1),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("search")
+            App::new("search")
                 .about("search password from checksum")
-                .arg(Arg::with_name("C1").required(true).index(1))
-                .arg(Arg::with_name("C2").required(true).index(2))
-                .arg(Arg::with_name("C3").required(true).index(3))
-                .arg(Arg::with_name("C4").required(true).index(4))
-                .arg(Arg::with_name("C5").required(true).index(5))
-                .arg(Arg::with_name("C6").required(true).index(6))
-                .arg(Arg::with_name("C7").required(true).index(7))
-                .arg(Arg::with_name("C8").required(true).index(8))
+                .arg(Arg::new("C1").required(true).index(1))
+                .arg(Arg::new("C2").required(true).index(2))
+                .arg(Arg::new("C3").required(true).index(3))
+                .arg(Arg::new("C4").required(true).index(4))
+                .arg(Arg::new("C5").required(true).index(5))
+                .arg(Arg::new("C6").required(true).index(6))
+                .arg(Arg::new("C7").required(true).index(7))
+                .arg(Arg::new("C8").required(true).index(8))
                 .arg(
-                    Arg::with_name("prefix")
+                    Arg::new("prefix")
                         .long("prefix")
                         .value_name("STR")
                         .takes_value(true)
@@ -41,7 +39,7 @@ fn main() {
                         .help("search password which only start with this"),
                 )
                 .arg(
-                    Arg::with_name("thread")
+                    Arg::new("thread")
                         .long("thread")
                         .value_name("NUM")
                         .takes_value(true)
