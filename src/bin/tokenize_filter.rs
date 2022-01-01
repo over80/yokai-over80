@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::Parser;
 use itertools::Itertools;
 use std::fs::File;
@@ -43,18 +43,28 @@ fn main() -> Result<()> {
             File::open(path).with_context(|| format!("cannot open file `{}'", p.display()))?;
         for line in BufReader::new(file).lines() {
             let line = line?;
-            let org_word = line.trim();
-            let upper_word = line.to_uppercase();
-
-            if upper_word.len() == 1 {
-                continue;
+            let line = line.trim();
+            let mut words = line.split_whitespace().collect::<Vec<_>>();
+            let label = match words.pop() {
+                Some(word) => word,
+                None => continue, // empty line
+            };
+            if words.len() == 0 {
+                if label.len() == 1 {
+                    continue; // 普通の英語辞書で１文字の単語は無視
+                }
+                words.push(label.clone());
             }
 
-            if upper_word.chars().all(|c| match c {
-                'A'..='Z' => true,
-                _ => false,
-            }) {
-                dic.insert(&upper_word, org_word)?
+            for word in &words {
+                let upper_word = word.to_uppercase();
+
+                if upper_word.chars().all(|c| match c {
+                    'A'..='Z' => true,
+                    _ => false,
+                }) {
+                    dic.insert(&upper_word, label)?
+                }
             }
         }
     }
@@ -71,7 +81,7 @@ fn main() -> Result<()> {
                     Found,
                     Finished,
                     MoreThanTwice,
-                };
+                }
                 if result
                     .iter()
                     .fold(NumberState::Initial, |s, t| match (&s, t) {
@@ -87,6 +97,10 @@ fn main() -> Result<()> {
             }
 
             // 特定のトークン間では空白を開けない
+            let is_alphabet = |s: &String| {
+                let c = s.chars().nth(0).unwrap();
+                ('a'..='z').contains(&c) || ('A'..='Z').contains(&c)
+            };
             let spacer: Vec<String> = result
                 .iter()
                 .zip(&result[1..])
@@ -100,6 +114,9 @@ fn main() -> Result<()> {
 
                     // 記号同士の間
                     (Delimiter(_), Delimiter(_)) => "",
+
+                    // ひらがな同士の間
+                    (Word(ref a), Word(ref b)) if !is_alphabet(a) && !is_alphabet(b) => "",
 
                     // デフォルトはスペースを空ける
                     _ => " ",
