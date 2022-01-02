@@ -42,7 +42,7 @@ jobs:
         command: build
         args: --release --target x86_64-pc-windows-gnu
     - run: mkdir yokai_over80/windows/
-    - run: cp target/x86_64-pc-windows-gnu/release/{yokai,tokenize_filter} yokai_over80/windows/
+    - run: cp target/x86_64-pc-windows-gnu/release/{yokai,tokenize_filter}.exe yokai_over80/windows/
     
 # make archive
     - run: zip -r yokai_over80.zip yokai_over80/
