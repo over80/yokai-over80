@@ -46,6 +46,6 @@ jobs:
     
 # upload
     - uses: actions/upload-artifact@v1
-        with:
-          name: build_result
-          path: yokai_over80.zip
+      with:
+        name: build_result
+        path: yokai_over80.zip
