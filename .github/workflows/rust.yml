@@ -1,0 +1,51 @@
+name: Rust
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    
+# static files
+    - run: mkdir yokai_over80/
+    - run: cp -r README.md dict/ yokai_over80/
+
+# build for linux
+    - uses: actions-rs/toolchain@v1
+    - uses: actions-rs/cargo@v1
+      with:
+        command: build
+        args: --release
+    - run: mkdir yokai_over80/linux/
+    - run: cp target/x86_64-pc-windows-gnu/release/{yokai,tokenize_filter} yokai_over80/linux/
+
+# build for windows
+    - uses: actions-rs/toolchain@v1
+      with:
+        target: x86_64-pc-windows-gnu
+    - uses: actions-rs/cargo@v1
+      with:
+        use-cross: true
+        command: build
+        args: --release --target x86_64-pc-windows-gnu
+    - run: mkdir yokai_over80/windows/
+    - run: cp target/x86_64-pc-windows-gnu/release/{yokai,tokenize_filter} yokai_over80/windows/
+    
+# make archive
+    - run: zip -r yokai_over80.zip yokai_over80/
+    
+# upload
+    - uses: actions/upload-artifact@v1
+        with:
+          name: build_result
+          path: yokai_over80.zip
