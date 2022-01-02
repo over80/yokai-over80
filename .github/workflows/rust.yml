@@ -22,6 +22,8 @@ jobs:
 
 # build for linux
     - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
     - uses: actions-rs/cargo@v1
       with:
         command: build
@@ -32,6 +34,7 @@ jobs:
 # build for windows
     - uses: actions-rs/toolchain@v1
       with:
+        toolchain: nightly
         target: x86_64-pc-windows-gnu
     - uses: actions-rs/cargo@v1
       with:
