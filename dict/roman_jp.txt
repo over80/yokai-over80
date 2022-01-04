@@ -105,3 +105,105 @@ byo びょ
 pya ぴゃ
 pyu ぴゅ
 pyo ぴょ
+
+kka っか
+kki っき
+kku っく
+kke っけ
+kko っこ
+ssa っさ
+ssi sshi っし
+ssu っす
+sse っせ
+sso っそ
+tta った
+tti cchi っち
+ttu ttsu っつ
+tte って
+tto っと
+nna っな
+nni っに
+nnu っぬ
+nne っね
+nno っの
+hha っは
+hhi っひ
+hhu ffu っふ
+hhe っへ
+hho っほ
+mma っま
+mmi っみ
+mmu っむ
+mme っめ
+mmo っも
+yya っや
+yyu っゆ
+yyo っよ
+rra っら
+rri っり
+rru っる
+rre っれ
+rro っろ
+wwa っわ
+wwo っを
+
+gga っが
+ggi っぎ
+ggu っぐ
+gge っげ
+ggo っご
+zza っざ
+zzi jji っじ
+zzu っず
+zze っぜ
+zzo っぞ
+dda っだ
+ddi っぢ
+ddu っづ
+dde っで
+ddo っど
+bba っば
+bbi っび
+bbu っぶ
+bbe っべ
+bbo っぼ
+ppa っぱ
+ppi っぴ
+ppu っぷ
+ppe っぺ
+ppo っぽ
+
+kkya っきゃ
+kkyu っきゅ
+kkyo っきょ
+ssya ssha っしゃ
+ssyu sshu っしゅ
+ssho ssho っしょ
+ttya ccha っちゃ
+ttyu cchu っちゅ
+ttyo ccho っちょ
+nnya っにゃ
+nnyu っにゅ
+nnyo っにょ
+mmya っみゃ
+mmyu っみゅ
+mmyo っみょ
+
+rrya っりゃ
+rryu っりゅ
+rryo っりょ
+ggya っぎゃ
+ggyu っぎゅ
+ggyo っぎょ
+zzya jja っじゃ
+zzyu jju っじゅ
+zzyo jjo っじょ
+ddya っぢゃ
+ddyu っぢゅ
+ddyo っぢょ
+bbya っびゃ
+bbyu っびゅ
+bbyo っびょ
+ppya っぴゃ
+ppyu っぴゅ
+ppyo っぴょ
