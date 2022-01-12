@@ -9,12 +9,14 @@
 - Twitter: #隠しパスワード解析選手権
   - https://twitter.com/hashtag/%E9%9A%A0%E3%81%97%E3%83%91%E3%82%B9%E3%83%AF%E3%83%BC%E3%83%89%E8%A7%A3%E6%9E%90%E9%81%B8%E6%89%8B%E6%A8%A9
 
-２つのツールを同梱しています
+下記のツールを同梱しています
 
 - yokai
   - パスワードからのハッシュ計算＆ハッシュ値からのパスワード検索ツール
 - tokenize_filter
   - パスワード一覧と辞書ファイルから、パスワードを人間が読める形に書き下す（読めないものを弾く）ツール
+- no_exists_subsequence
+  - 辞書ファイルから、その中に出現しない部分文字列を列挙するツール
 
 # つかいかた
 
@@ -71,3 +73,9 @@ FOUND!!  passcode is...
 $ echo "KILLNU095TICKS" | tokenize_filter -d dict/american-english -d dict/roman_jp.txt
 KILLNU095TICKS	kill ぬ 095 ticks
 ```
+
+## no_exists_subsequence
+
+- `-d` で辞書ファイルを指定(複数可)
+- その辞書の単語中に１度も登場しなかった部分文字列を出力する
+  - 明らかに包含されるような部分文字列は列挙しません（例： `Q` を含む単語は有るが `QQ` を含む単語は存在しなかった場合、`QQ`は出力されますが、`QQA`, `QQB`……などは出力されません）

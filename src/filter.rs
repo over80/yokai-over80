@@ -122,6 +122,23 @@ impl Node {
             }
         }
     }
+
+    fn has_node(&self, code: &[usize]) -> bool {
+        if code.len() == 0 {
+            return true;
+        } else {
+            let c = code[0];
+            if c >= self.next.len() {
+                return true;
+            }
+            if let Some(next_node) = &self.next[c] {
+                let rest = &code[1..];
+                return next_node.has_node(rest);
+            } else {
+                return false;
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -266,6 +283,19 @@ impl Dictionary {
 
         None
     }
+
+    pub fn has_node(&self, word: &str) -> bool {
+        let codes = word
+            .chars()
+            .map(|c| self.charmap.char_to_code(c))
+            .collect::<Option<Vec<_>>>();
+        if let None = codes {
+            return false;
+        }
+        let codes = codes.unwrap();
+
+        return self.root.has_node(&codes);
+    }
 }
 
 #[cfg(test)]
@@ -376,6 +406,21 @@ mod test {
                 Token::Word("cd".to_owned())
             ])
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_hasnode() -> Result<()> {
+        let mut dic = Dictionary::new();
+
+        dic.insert("ABC", "")?;
+        assert_eq!(dic.has_node("A"), true);
+        assert_eq!(dic.has_node("AB"), true);
+        assert_eq!(dic.has_node("ABC"), true);
+        assert_eq!(dic.has_node("AC"), false);
+        assert_eq!(dic.has_node("B"), false);
+        assert_eq!(dic.has_node("DE"), false);
+
         Ok(())
     }
 }
